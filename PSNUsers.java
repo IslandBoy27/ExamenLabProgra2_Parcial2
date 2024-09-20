@@ -5,7 +5,7 @@ import java.text.SimpleDateFormat;
 
 public class PSNUsers {
     private RandomAccessFile raf;
-    private HashTable users;
+    private Hashtable<String, Long> users;
 
     public PSNUsers(String fileName) {
         try {
@@ -14,7 +14,7 @@ public class PSNUsers {
                 archivo.createNewFile(); // Crea el archivo si no existe
             }
             raf = new RandomAccessFile(archivo, "rw");
-            users = new HashTable();
+            users = new Hashtable<>();
             reloadHashTable();
         } catch (IOException e) {
             System.err.println("No se pudo abrir el archivo " + fileName + ": " + e.getMessage());
@@ -22,27 +22,10 @@ public class PSNUsers {
         }
     }
 
-    private void reloadHashTable() throws IOException {
-        raf.seek(0); // Volver al inicio del archivo
-        users = new HashTable(); // Limpiar tabla actual
 
-        while (raf.getFilePointer() < raf.length()) {
-            long pos = raf.getFilePointer();
-            String username = raf.readUTF();
-            int puntos = raf.readInt();
-            int contadorTrofeos = raf.readInt();
-            boolean activo = raf.readBoolean();
-
-            if (activo) { // Solo cargar usuarios activos
-                users.add(username, pos);
-            }
-
-            // Saltar el resto de los datos de usuario
-        }
-    }
 
     public void addUser(String username) throws IOException {
-        while (users.search(username) != -1) {
+        while (users.containsKey(username)) {
             username = JOptionPane.showInputDialog(null, "El usuario ya existe. Por favor, ingresa un nombre de usuario diferente:");
             if (username == null || username.trim().isEmpty()) {
                 JOptionPane.showMessageDialog(null, "Operación cancelada o nombre vacío.");
@@ -58,93 +41,148 @@ public class PSNUsers {
         raf.writeInt(0); // Contador de trofeos
         raf.writeBoolean(true); // Registro activado
 
-        users.add(username, pos);
+        users.put(username, pos);
         JOptionPane.showMessageDialog(null, "Usuario agregado con éxito.");
     }
 
-
     public void deactivateUser(String username) throws IOException {
-        long pos = users.search(username);
-        if (pos == -1) {
+        Long pos = users.get(username);
+        if (pos == null) {
             System.out.println("Usuario no encontrado.");
             return;
         }
 
-        raf.seek(pos + username.length() + 8); // Saltar los primeros datos hasta llegar a "activo"
+        raf.seek(pos);
+        raf.readUTF(); // Leer el nombre de usuario
+        raf.readInt(); // Leer puntos
+        raf.readInt(); // Leer contador de trofeos
         raf.writeBoolean(false); // Marcar como inactivo
 
         users.remove(username);
-        System.out.println("Usuario desactivado.");
+        JOptionPane.showMessageDialog(null, "Usuario desactivado exitosamente.", "Información", JOptionPane.INFORMATION_MESSAGE);
     }
 
     public void addTrophieTo(String username, String trophyGame, String trophyName, Trophy type) throws IOException {
-        long pos = users.search(username);
-        if (pos == -1) {
+        Long pos = users.get(username);
+        if (pos == null) {
             System.out.println("Usuario no encontrado.");
             return;
         }
 
-        // Leer y actualizar los puntos y trofeos del usuario
-        raf.seek(pos + username.length());
-        int puntos = raf.readInt();
-        int contadorTrofeos = raf.readInt();
+        // Mover el puntero a la posición del usuario
+        raf.seek(pos);
 
-        raf.seek(pos + username.length());
+        // Leer el nombre de usuario
+        String savedUsername = raf.readUTF();
+        if (!savedUsername.equals(username)) {
+            System.out.println("Error: nombres de usuario no coinciden.");
+            return;
+        }
+
+        // Leer puntos y contador de trofeos
+        int puntos = raf.readInt();         // Leer los puntos actuales
+        int contadorTrofeos = raf.readInt(); // Leer el número de trofeos
+
+        // Actualizar puntos y contador de trofeos
+        raf.seek(pos + savedUsername.length() * 2 + 4 + 4); // Mover al lugar de los puntos
         raf.writeInt(puntos + type.puntos); // Sumar puntos
-        raf.writeInt(contadorTrofeos + 1); // Incrementar el contador de trofeos
+        raf.writeInt(contadorTrofeos + 1);  // Incrementar el contador de trofeos
 
-        // Agregar el trofeo al archivo
+        // Añadir el trofeo al final del archivo
         raf.seek(raf.length());
-        raf.writeUTF(username);
-        raf.writeUTF(type.toString());
-        raf.writeUTF(trophyGame);
-        raf.writeUTF(trophyName);
-        raf.writeUTF(new SimpleDateFormat("dd/MM/yyyy").format(new Date()));
+        raf.writeUTF(username);               // Escribir el nombre del usuario
+        raf.writeUTF(type.toString());        // Escribir el tipo de trofeo
+        raf.writeUTF(trophyGame);             // Escribir el nombre del juego
+        raf.writeUTF(trophyName);             // Escribir el nombre del trofeo
+        raf.writeUTF(new SimpleDateFormat("dd/MM/yyyy").format(new Date())); // Fecha actual
 
         System.out.println("Trofeo agregado con éxito.");
     }
 
-    public void playerInfo(String username) {
-        Long pos = users.search(username); // Buscar la posición del usuario en la tabla hash
 
-        if (pos == null || pos == -1) {
+    // Step 1: Modify reloadHashTable to load all users
+    private void reloadHashTable() throws IOException {
+        raf.seek(0); // Volver al inicio del archivo
+        users = new Hashtable<>(); // Limpiar tabla actual
+
+        while (raf.getFilePointer() < raf.length()) {
+            long pos = raf.getFilePointer();
+            String username = raf.readUTF();
+            raf.readInt(); // Leer puntos pero no usar
+            raf.readInt(); // Leer contador de trofeos pero no usar
+            boolean activo = raf.readBoolean();
+
+            users.put(username, pos); // Cargar todos los usuarios
+        }
+    }
+
+    // Step 2: Modify playerInfo to correctly handle and display user information
+    public void playerInfo(String username) {
+        Long pos = users.get(username); // Buscar la posición del usuario en la tabla hash
+
+        if (pos == null) {
             // Si el usuario no se encuentra, mostrar un pop-up de error
             JOptionPane.showMessageDialog(null, "Usuario no encontrado", "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
-        // Aquí no hay que usar try-catch a menos que se necesite
         try {
             // Mover el puntero del archivo a la posición del usuario encontrado
             raf.seek(pos);
 
             // Leer los datos del usuario
             String nombreUsuario = raf.readUTF();
-            boolean activo = raf.readBoolean();
             int puntos = raf.readInt();
-            int trofeos = raf.readInt();
+            int trofeosContador = raf.readInt(); // Número de trofeos del usuario
+            boolean activo = raf.readBoolean();
 
-            if (!activo) {
-                // Si el usuario está desactivado, mostrar un pop-up
-                JOptionPane.showMessageDialog(null, "El usuario está desactivado", "Información", JOptionPane.WARNING_MESSAGE);
-                return;
+            // Mensaje de depuración para verificar el estado de activación del usuario
+            System.out.println("Usuario: " + nombreUsuario + " | Activo: " + activo);
+
+            // Crear un StringBuilder para mostrar la información
+            StringBuilder info = new StringBuilder();
+            info.append("Código de Usuario: ").append(pos).append("\n")
+                    .append("Nombre de Usuario: ").append(nombreUsuario).append("\n")
+                    .append("Puntos: ").append(puntos).append("\n")
+                    .append("Número de Trofeos: ").append(trofeosContador).append("\n")
+                    .append("Activo: ").append(activo ? "Sí" : "No").append("\n");
+
+            // Mostrar trofeos del usuario
+            info.append("Trofeos:\n");
+
+            // Variables para puntos totales y mostrar detalles de cada trofeo
+            int puntosTotales = puntos;
+
+            // Leer los trofeos
+            long currentPosition = raf.getFilePointer();
+            raf.seek(0); // Reset to the beginning of the file to read trophies
+            while (raf.getFilePointer() < raf.length()) {
+                try {
+                    String codigoUsuario = raf.readUTF();
+                    String tipoTrofeo = raf.readUTF();
+                    String juegoTrofeo = raf.readUTF();
+                    String descripcionTrofeo = raf.readUTF();
+                    String fecha = raf.readUTF();
+
+                    if (codigoUsuario.equals(username)) {
+                        info.append(fecha).append(" - ").append(tipoTrofeo).append(" - ").append(juegoTrofeo).append(" - ").append(descripcionTrofeo).append("\n");
+                    }
+                } catch (EOFException e) {
+                    break; // End of file reached
+                }
             }
+            raf.seek(currentPosition); // Restore the file pointer position
 
-            // Construir la información a mostrar
-            String info = "Username: " + nombreUsuario + "\n" +
-                    "Puntos: " + puntos + "\n" +
-                    "Trofeos: " + trofeos + "\n" +
-                    "Activo: Sí";
+            // Mostrar los puntos totales
+            info.append("Puntos Totales: ").append(puntosTotales).append("\n");
 
             // Mostrar la información del usuario en un pop-up
-            JOptionPane.showMessageDialog(null, info, "Información del usuario", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(null, info.toString(), "Información del usuario", JOptionPane.INFORMATION_MESSAGE);
 
         } catch (IOException e) {
             // Si ocurre algún error al leer el archivo, mostrar un pop-up de error
-            JOptionPane.showMessageDialog(null, "Error al leer la información del usuario", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(null, "Error al leer la información del usuario: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace(); // Para obtener más detalles en la consola
         }
     }
-
-
-
 }
